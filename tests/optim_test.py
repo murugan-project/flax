@@ -28,6 +28,7 @@ import jax.numpy as jnp
 import numpy as onp
 
 from flax.optim.adam import _AdamHyperParams, _AdamParamState
+from flax.optim.adafactor import _AdafactorHyperParams, _AdafactorParamState
 from flax.optim.adagrad import _AdagradHyperParams, _AdagradParamState
 from flax.optim.momentum import _MomentumHyperParams, _MomentumParamState
 from flax.optim.rmsprop import _RMSPropHyperParams, _RMSPropParamState
@@ -36,6 +37,11 @@ from flax.optim.weight_norm import _WeightNormParamState
 
 # Parse absl flags test_srcdir and test_tmpdir.
 jax.config.parse_flags_with_absl()
+
+
+def check_eq(xs, ys):
+  jax.tree_util.tree_all(
+      jax.tree_util.tree_multimap(onp.testing.assert_allclose, xs, ys))
 
 
 class OptimizerDefTest(absltest.TestCase):
@@ -251,6 +257,48 @@ class AdamTest(absltest.TestCase):
     expected_new_params = onp.array([0.906085])
     onp.testing.assert_allclose(new_params, expected_new_params)
     self.assertEqual(new_state, expected_new_state)
+
+
+class AdafactorTest(absltest.TestCase):
+
+  def test_init_state(self):
+    params = onp.zeros((3, 2))
+    optimizer_def = optim.Adafactor(learning_rate=0.1,
+                                    decay_rate=0.8,
+                                    beta1=0.0)
+    state = optimizer_def.init_state(params)
+
+    expected_hyper_params = _AdafactorHyperParams(0.1, True, True, True, False,
+                                                  0.0, 0.8, 1.0, 1e-5, 1e-30,
+                                                  1e-3)
+    self.assertEqual(optimizer_def.hyper_params, expected_hyper_params)
+    expected_state = optim.OptimizerState(
+        0, _AdafactorParamState(onp.zeros((3,)), onp.zeros((2,)),
+                                onp.zeros(()), onp.zeros(())))
+    check_eq(state, expected_state)
+
+  def test_apply_gradient(self):
+    optimizer_def = optim.Adafactor(learning_rate=0.1, decay_rate=0.8)
+    params = onp.ones((3, 2), onp.float32)
+    state = optim.OptimizerState(
+        1, _AdafactorParamState(onp.array([0.1, 0.1, 0.1]),
+                                onp.array([0.9, 0.9]),
+                                onp.zeros(()),
+                                onp.zeros(())))
+    grads = onp.ones((3, 2), onp.float32)
+    new_params, new_state = optimizer_def.apply_gradient(
+        optimizer_def.hyper_params, params, state, grads)
+    expected_new_state = optim.OptimizerState(
+        2, _AdafactorParamState(
+            onp.array([0.6169143, 0.6169143, 0.6169143]),
+            onp.array([0.9574349, 0.9574349]),
+            onp.zeros(()),
+            onp.zeros(())))
+    expected_new_params = onp.array([[0.89998996, 0.89998996],
+                                     [0.89998996, 0.89998996],
+                                     [0.89998996, 0.89998996]])
+    onp.testing.assert_allclose(new_params, expected_new_params)
+    check_eq(new_state, expected_new_state)
 
 
 class AdagradTest(absltest.TestCase):
